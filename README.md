@@ -1,4 +1,4 @@
-# haas-client
+# haas client py sdk
 
 Python SDK for the [HaaS](https://github.com/dacs30/haas) (Harness as a Service) API.
 
@@ -7,7 +7,7 @@ Spin up isolated Docker containers, run commands, and manage files — all from 
 ## Installation
 
 ```bash
-pip install haas-client
+pip install haas-py
 ```
 
 ## Quick start
