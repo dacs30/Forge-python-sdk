@@ -21,5 +21,9 @@ class ForbiddenError(HaasError):
     """Raised when the action is not allowed (HTTP 403)."""
 
 
+class ConflictError(HaasError):
+    """Raised when the request conflicts with current state (HTTP 409)."""
+
+
 class ServerError(HaasError):
     """Raised on unexpected server errors (HTTP 5xx)."""

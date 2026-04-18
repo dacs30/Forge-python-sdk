@@ -8,8 +8,8 @@ from urllib.parse import quote
 
 import httpx
 
-from .exceptions import AuthenticationError, ForbiddenError, HaasError, NotFoundError, ServerError
-from .types import Environment, ExecEvent, ExecResult, FileInfo
+from .exceptions import AuthenticationError, ConflictError, ForbiddenError, HaasError, NotFoundError, ServerError
+from .types import Environment, ExecEvent, ExecResult, FileInfo, Snapshot
 
 
 class Client:
@@ -53,15 +53,20 @@ class Client:
 
     def create_environment(
         self,
-        image: str,
+        image: str = "",
         *,
         cpu: float = 0.0,
         memory_mb: int = 0,
         disk_mb: int = 0,
         network_policy: str = "",
         env_vars: Optional[dict[str, str]] = None,
+        snapshot_id: str = "",
     ) -> Environment:
         """Provision a new container environment.
+
+        Supply either *image* or *snapshot_id*. When *snapshot_id* is given the
+        environment is restored from a previously-saved snapshot and *image* is
+        ignored.
 
         Args:
             image: Docker image to use (e.g. ``"ubuntu:22.04"``).
@@ -71,11 +76,16 @@ class Client:
             network_policy: ``"none"``, ``"egress-limited"``, or ``"full"``
                 (empty = server default).
             env_vars: Environment variables to inject into the container.
+            snapshot_id: Restore from this snapshot instead of a fresh image.
 
         Returns:
             The created :class:`Environment`.
         """
-        body: dict = {"image": image}
+        body: dict = {}
+        if snapshot_id:
+            body["snapshot_id"] = snapshot_id
+        elif image:
+            body["image"] = image
         if cpu:
             body["cpu"] = cpu
         if memory_mb:
@@ -219,6 +229,46 @@ class Client:
         )
         _raise_for_status(resp)
 
+    # --- Snapshots --------------------------------------------------------------
+
+    def create_snapshot(self, env_id: str, *, label: str = "") -> Snapshot:
+        """Snapshot a running environment's filesystem.
+
+        Args:
+            env_id: Environment ID of the running container.
+            label: Optional human-readable label for the snapshot.
+
+        Returns:
+            The created :class:`Snapshot`.
+
+        Raises:
+            ConflictError: If the environment is not in the *running* state.
+        """
+        body: dict = {}
+        if label:
+            body["label"] = label
+        resp = self._request("POST", f"/v1/environments/{env_id}/snapshots", json=body)
+        _raise_for_status(resp)
+        return Snapshot._from_dict(resp.json())
+
+    def list_snapshots(self) -> list[Snapshot]:
+        """Return all snapshots owned by this API key."""
+        resp = self._request("GET", "/v1/snapshots")
+        _raise_for_status(resp)
+        items = resp.json() or []
+        return [Snapshot._from_dict(s) for s in items]
+
+    def get_snapshot(self, snapshot_id: str) -> Snapshot:
+        """Return details of a specific snapshot."""
+        resp = self._request("GET", f"/v1/snapshots/{snapshot_id}")
+        _raise_for_status(resp)
+        return Snapshot._from_dict(resp.json())
+
+    def delete_snapshot(self, snapshot_id: str) -> None:
+        """Delete a snapshot and its underlying Docker image."""
+        resp = self._request("DELETE", f"/v1/snapshots/{snapshot_id}")
+        _raise_for_status(resp)
+
     # --- internal ---------------------------------------------------------------
 
     def _url(self, path: str) -> str:
@@ -246,6 +296,8 @@ def _raise_for_status(resp: httpx.Response) -> None:
         raise ForbiddenError(message, resp.status_code)
     if resp.status_code == 404:
         raise NotFoundError(message, resp.status_code)
+    if resp.status_code == 409:
+        raise ConflictError(message, resp.status_code)
     if resp.status_code >= 500:
         raise ServerError(message, resp.status_code)
     raise HaasError(message, resp.status_code)

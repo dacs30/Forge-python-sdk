@@ -106,6 +106,28 @@ print(data.decode())
 client.write_file(env.id, "/tmp/script.py", "print('hello')")
 ```
 
+#### Snapshots
+
+Save and restore environment state:
+
+```python
+# Snapshot a running environment
+snap = client.create_snapshot(env.id, label="after-setup")
+print(snap.id)  # "snap_a1b2c3d4e5f6"
+
+# List all snapshots
+snapshots = client.list_snapshots()
+
+# Get snapshot details
+snap = client.get_snapshot(snap.id)
+
+# Restore: create a new environment from a snapshot
+restored = client.create_environment(snapshot_id=snap.id)
+
+# Delete a snapshot (removes the underlying Docker image too)
+client.delete_snapshot(snap.id)
+```
+
 ## Error handling
 
 All errors inherit from `haas.HaasError` and carry a `status_code` attribute.
@@ -115,6 +137,7 @@ All errors inherit from `haas.HaasError` and carry a `status_code` attribute.
 | `AuthenticationError` | 401 |
 | `ForbiddenError` | 403 (e.g. image not on allowlist) |
 | `NotFoundError` | 404 |
+| `ConflictError` | 409 (e.g. snapshot of non-running env) |
 | `ServerError` | 5xx |
 | `HaasError` | any other 4xx |
 
@@ -138,3 +161,4 @@ except haas.HaasError as e:
 | `ExecResult` | `stdout`, `stderr`, `exit_code`, `ok` |
 | `ExecEvent` | `stream` (`"stdout"` / `"stderr"` / `"exit"`), `data` |
 | `FileInfo` | `name`, `path`, `size`, `is_dir`, `mod_time` |
+| `Snapshot` | `id`, `environment_id`, `image_id`, `label`, `size`, `created_at` |

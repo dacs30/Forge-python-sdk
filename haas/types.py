@@ -84,3 +84,24 @@ class FileInfo:
             is_dir=data["is_dir"],
             mod_time=data["mod_time"],
         )
+
+
+@dataclass
+class Snapshot:
+    id: str
+    environment_id: str
+    image_id: str
+    label: str
+    size: int
+    created_at: datetime
+
+    @classmethod
+    def _from_dict(cls, data: dict) -> "Snapshot":
+        return cls(
+            id=data["id"],
+            environment_id=data["environment_id"],
+            image_id=data["image_id"],
+            label=data.get("label", ""),
+            size=data.get("size", 0),
+            created_at=datetime.fromisoformat(data["created_at"].replace("Z", "+00:00")),
+        )

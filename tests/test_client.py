@@ -5,7 +5,7 @@ import pytest
 from pytest_httpx import HTTPXMock
 
 import haas
-from haas.exceptions import AuthenticationError, ForbiddenError, NotFoundError, ServerError
+from haas.exceptions import AuthenticationError, ConflictError, ForbiddenError, NotFoundError, ServerError
 
 
 BASE = "http://localhost:8080"
@@ -26,6 +26,15 @@ ENV_DETAIL = {
     "created_at": "2024-01-01T00:00:00Z",
     "last_used_at": "2024-01-01T00:00:00Z",
     "expires_at": "2024-01-01T01:00:00Z",
+}
+
+SNAPSHOT_DETAIL = {
+    "id": "snap_a1b2c3d4e5f6",
+    "environment_id": "env_abc123",
+    "image_id": "sha256:abc123",
+    "label": "after-setup",
+    "size": 0,
+    "created_at": "2024-01-01T00:30:00Z",
 }
 
 
@@ -288,3 +297,123 @@ def test_client_context_manager(httpx_mock: HTTPXMock):
     with haas.Client(BASE, KEY) as client:
         envs = client.list_environments()
     assert envs == []
+
+
+# --- create_environment with snapshot_id --------------------------------------
+
+def test_create_environment_from_snapshot(httpx_mock: HTTPXMock, client: haas.Client):
+    httpx_mock.add_response(
+        method="POST",
+        url=f"{BASE}/v1/environments",
+        status_code=201,
+        json={"id": "env_restored", "status": "running", "image": "snap_a1b2c3d4e5f6"},
+    )
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{BASE}/v1/environments/env_restored",
+        status_code=200,
+        json={**ENV_DETAIL, "id": "env_restored"},
+    )
+
+    env = client.create_environment(snapshot_id="snap_a1b2c3d4e5f6")
+
+    assert env.id == "env_restored"
+    assert env.status == "running"
+
+
+# --- snapshots ----------------------------------------------------------------
+
+def test_create_snapshot(httpx_mock: HTTPXMock, client: haas.Client):
+    httpx_mock.add_response(
+        method="POST",
+        url=f"{BASE}/v1/environments/env_abc123/snapshots",
+        status_code=201,
+        json=SNAPSHOT_DETAIL,
+    )
+
+    snap = client.create_snapshot("env_abc123", label="after-setup")
+
+    assert snap.id == "snap_a1b2c3d4e5f6"
+    assert snap.environment_id == "env_abc123"
+    assert snap.image_id == "sha256:abc123"
+    assert snap.label == "after-setup"
+
+
+def test_create_snapshot_conflict(httpx_mock: HTTPXMock, client: haas.Client):
+    httpx_mock.add_response(
+        method="POST",
+        url=f"{BASE}/v1/environments/env_abc123/snapshots",
+        status_code=409,
+        json={"error": "environment must be running to create a snapshot", "code": 409},
+    )
+    with pytest.raises(ConflictError, match="must be running"):
+        client.create_snapshot("env_abc123")
+
+
+def test_list_snapshots(httpx_mock: HTTPXMock, client: haas.Client):
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{BASE}/v1/snapshots",
+        status_code=200,
+        json=[SNAPSHOT_DETAIL],
+    )
+
+    snaps = client.list_snapshots()
+
+    assert len(snaps) == 1
+    assert snaps[0].id == "snap_a1b2c3d4e5f6"
+
+
+def test_list_snapshots_empty(httpx_mock: HTTPXMock, client: haas.Client):
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{BASE}/v1/snapshots",
+        status_code=200,
+        json=[],
+    )
+    assert client.list_snapshots() == []
+
+
+def test_get_snapshot(httpx_mock: HTTPXMock, client: haas.Client):
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{BASE}/v1/snapshots/snap_a1b2c3d4e5f6",
+        status_code=200,
+        json=SNAPSHOT_DETAIL,
+    )
+
+    snap = client.get_snapshot("snap_a1b2c3d4e5f6")
+
+    assert snap.id == "snap_a1b2c3d4e5f6"
+    assert snap.label == "after-setup"
+
+
+def test_get_snapshot_not_found(httpx_mock: HTTPXMock, client: haas.Client):
+    httpx_mock.add_response(
+        method="GET",
+        url=f"{BASE}/v1/snapshots/snap_missing",
+        status_code=404,
+        json={"error": "snapshot not found", "code": 404},
+    )
+    with pytest.raises(NotFoundError):
+        client.get_snapshot("snap_missing")
+
+
+def test_delete_snapshot(httpx_mock: HTTPXMock, client: haas.Client):
+    httpx_mock.add_response(
+        method="DELETE",
+        url=f"{BASE}/v1/snapshots/snap_a1b2c3d4e5f6",
+        status_code=204,
+    )
+    client.delete_snapshot("snap_a1b2c3d4e5f6")  # should not raise
+
+
+def test_delete_snapshot_not_found(httpx_mock: HTTPXMock, client: haas.Client):
+    httpx_mock.add_response(
+        method="DELETE",
+        url=f"{BASE}/v1/snapshots/snap_gone",
+        status_code=404,
+        json={"error": "snapshot not found", "code": 404},
+    )
+    with pytest.raises(NotFoundError):
+        client.delete_snapshot("snap_gone")
